@@ -407,7 +407,8 @@ python -m unittest discover -s server/tests -t . -v
 ### 2. Docker
 
 The repo includes the console and the upstream source in `workbuddy2api-master/`; one
-Compose project starts both services:
+Compose project starts **one container**, whose entrypoint starts both the Go gateway and
+the Python console:
 
 ```bash
 git clone https://github.com/ithtelab/workbuddy-manager.git
@@ -426,21 +427,15 @@ docker pull ghcr.io/ithtelab/workbuddy-manager:latest
 > cloud hosts can pull it directly, with no QEMU emulation). `docker pull` picks the
 > right one for your machine automatically.
 
-**The container build has the same capabilities as a host install** — the compose file
-mounts three things to make that true:
+Compose persists only the runtime data:
 
 | Mount | Purpose |
 |---|---|
-| `./workbuddy2api-master` | Bundled upstream source, config and account credentials; first boot creates `config.json` and data directories |
-| `./data` | Database, logs, update state. Must be persisted |
-| `/var/run/docker.sock` | Lets the console inside the container restart/rebuild the upstream container — i.e. "update upstream", "auto-reload after saving settings" and "read upstream logs" |
+| `workbuddy-upstream-data` | Upstream `config.json`, account credentials and state; created on first boot |
+| `workbuddy-manager-data` | Database, logs, update state. Must be persisted |
 
-> **On mounting docker.sock**: it grants this container host-root privileges. But this is
-> **not a new risk level** — a host install already runs as root (the systemd unit has no
-> `User=`, and the installer requires root), and a root process can already reach the host
-> filesystem via `docker run -v /:/host`. The two are equivalent.
-> If you need least privilege, comment that line out: docker-dependent features **degrade
-> gracefully** to "run this on the host" with a clear notice in the UI, never failing silently.
+**No Docker Socket is mounted.** Saving upstream settings or adding an account restarts the
+Go child process inside the same container; its logs are written to `data/workbuddy2api.log`.
 
 Two other differences from a host install (both surfaced in the UI):
 
@@ -503,8 +498,8 @@ Full deployment notes (Nginx config, hardening, FAQ) are in [deploy/README.md](d
 | `WB2API_BASE` | `http://127.0.0.1:7863` | workbuddy2api address |
 | `WB2API_KEY` | from config.json | Upstream API key |
 | `WB2API_CONTAINER` | `workbuddy2api` | Container name used for reloads |
-| `WB_AUTH_DIR` | `/opt/workbuddy2api/auths` | Account auth directory |
-| `WB_UPSTREAM_CONFIG` | `/opt/workbuddy2api/config.json` | Upstream config file |
+| `WB_AUTH_DIR` | `/opt/workbuddy2api/auths` | Account auth directory (overridden to a named-volume path by single-container Compose) |
+| `WB_UPSTREAM_CONFIG` | `/opt/workbuddy2api/config.json` | Upstream config file (overridden to a named-volume path by single-container Compose) |
 | `WB_DATA_DIR` | `./data` | This service's data directory |
 | `WB_STATIC_DIR` | `./web/out` | Static export directory |
 | `WB_ADMIN_PASSWORD` | random | Initial admin password |

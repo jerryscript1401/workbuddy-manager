@@ -41,7 +41,7 @@ async def save_upstream(body: dict, request: Request,
     #
     # 判据是**实际能力**而非"是否容器"：容器挂了 docker.sock 就能自动重载
     # （与宿主部署等价），宿主没装 docker 反而不能。
-    if not updater.can_control_docker():
+    if not (wb2api.can_restart_in_process() or updater.can_control_docker()):
         result['reload_scheduled'] = False
         result['reload_hint'] = (
             '配置已写入，但当前环境无法操作 docker，不会自动重启上游容器。'

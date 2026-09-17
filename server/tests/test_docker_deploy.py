@@ -203,61 +203,53 @@ class UpstreamUpdateGuardTest(unittest.TestCase):
 class DockerAssetsTest(unittest.TestCase):
     """部署资产存在且关键约定正确（这些错了用户装不起来）。"""
 
-    def test_dockerfile_present_and_non_root(self) -> None:
+    @staticmethod
+    def _compose() -> str:
+        return (_ROOT / 'docker-compose.yml').read_text(encoding='utf-8')
+
+    def test_dockerfile_builds_bundled_upstream_and_drops_privileges(self) -> None:
         df = (_ROOT / 'Dockerfile').read_text(encoding='utf-8')
         self.assertIn('FROM python:3.12', df)
-        self.assertIn('USER app', df, '不应以 root 运行容器')
+        self.assertIn('FROM golang:', df, '内置上游必须在同一镜像内编译')
+        self.assertIn('COPY workbuddy2api-master/', df)
+        entry = (_ROOT / 'deploy' / 'container-entrypoint.sh').read_text(encoding='utf-8')
+        self.assertIn('gosu app', entry, '初始化权限后必须以 app 用户运行服务')
         self.assertIn('WB_RUN_MODE=docker', df,
                       '镜像里没设运行形态 —— 容器内会误判成宿主、去调 systemctl')
-        # 前端产物必须来自静态导出（server 构建会产出 server 版，FastAPI 托管不了）
-        self.assertIn('COPY web/out', df)
+        self.assertIn('PYTHONPATH=/app', df,
+                      '入口切换到上游工作目录后，仍必须能导入管理端 server 包')
+        # 前端必须在镜像构建中静态导出，裸 clone 不应依赖已有 web/out。
+        self.assertIn('FROM node:', df)
+        self.assertIn('npm run build:export', df)
+        self.assertIn('COPY --from=web-build /web/out', df)
 
     def test_compose_has_restart_policy(self) -> None:
         """restart 策略是容器版「一键更新」能生效的前提：
         更新进程结束容器后，靠它用新代码拉起。"""
-        import yaml
-        dc = yaml.safe_load((_ROOT / 'docker-compose.yml').read_text(encoding='utf-8'))
-        svc = dc['services']['workbuddy-manager']
-        self.assertIn(svc.get('restart'), ('unless-stopped', 'always'),
+        compose = self._compose()
+        self.assertIn('restart: unless-stopped', compose,
                       'restart 策略缺失 —— 容器更新后将不会自动恢复')
         # 默认只监听本机：管理端持有全部账号凭据，不该直接暴露公网
-        ports = svc.get('ports') or []
-        self.assertTrue(any('127.0.0.1' in str(p) for p in ports),
+        self.assertIn('127.0.0.1:7864:7864', compose,
                         '端口未绑定到 127.0.0.1 —— 管理端不应默认暴露公网')
 
     def test_compose_persists_data(self) -> None:
-        import yaml
-        dc = yaml.safe_load((_ROOT / 'docker-compose.yml').read_text(encoding='utf-8'))
-        vols = dc['services']['workbuddy-manager'].get('volumes') or []
-        self.assertTrue(any('/app/data' in str(v) for v in vols),
-                        '未持久化 data 卷 —— 重建容器会丢失统计与审计记录')
+        self.assertIn('workbuddy-manager-data:/app/data', self._compose(),
+                      '未持久化 data 卷 —— 重建容器会丢失统计与审计记录')
 
-    def test_upstream_dir_mounted(self) -> None:
-        """必须挂载上游仓库目录。
+    def test_single_container_persists_upstream_runtime_data(self) -> None:
+        """源码编入镜像，只有配置、账号与状态需要持久化。"""
+        compose = self._compose()
+        self.assertIn('workbuddy-upstream-data:/var/lib/workbuddy2api', compose,
+                      '未持久化上游运行数据 —— 重建后会丢账号和配置')
+        self.assertNotIn('workbuddy2api-init:', compose,
+                         '单容器部署不应再声明额外上游服务')
+        self.assertNotIn('\n  workbuddy2api:\n', compose,
+                         '单容器部署不应再声明额外上游服务')
 
-        没挂的话容器内既拿不到上游的 docker-compose.yml（端口收敛无从下手），
-        也无法在容器内 git pull —— 「更新上游」直接做不到。
-        （这正是初版的问题：只挂了 auths 与 config.json 两条子路径。）
-        """
-        import yaml
-        dc = yaml.safe_load((_ROOT / 'docker-compose.yml').read_text(encoding='utf-8'))
-        vols = [str(v) for v in (dc['services']['workbuddy-manager'].get('volumes') or [])]
-        self.assertTrue(any('/opt/workbuddy2api' in v for v in vols),
-                        '未挂载上游目录 —— 容器版将无法更新上游')
-
-    def test_docker_socket_mounted_for_full_capability(self) -> None:
-        """默认挂载 docker.sock，使容器版与宿主部署能力对齐。
-
-        这是**判断修正**：初版刻意不挂，理由写成"挂了等于把宿主 root 交给容器"。
-        但宿主部署本来就是 root（systemd 无 User=），而 root 进程本来就能
-        `docker run -v /:/host` —— 两者权限等价，不挂只是让功能残缺。
-        若不想要，注释掉即可（功能会自动降级并如实提示）。
-        """
-        import yaml
-        dc = yaml.safe_load((_ROOT / 'docker-compose.yml').read_text(encoding='utf-8'))
-        vols = [str(v) for v in (dc['services']['workbuddy-manager'].get('volumes') or [])]
-        self.assertTrue(any('docker.sock' in v for v in vols),
-                        '未挂 docker.sock —— 容器版将无法重载/更新上游')
+    def test_single_container_does_not_mount_docker_socket(self) -> None:
+        self.assertNotIn('/var/run/docker.sock:', self._compose(),
+                         '单容器模式不得依赖 Docker Socket')
 
 
 if __name__ == '__main__':
@@ -365,44 +357,11 @@ class MultiArchImageTest(unittest.TestCase):
         self.assertIn('setup-qemu-action', wf,
                       '跨架构构建 arm64 层需要 QEMU（runner 是 amd64）')
 
-    def test_dockerfile_does_not_hardcode_x86_64(self) -> None:
+    def test_dockerfile_builds_upstream_from_bundled_source(self) -> None:
         df = (_ROOT / 'Dockerfile').read_text(encoding='utf-8')
-        # 只检查 docker CLI 下载那一行：别的注释里出现 x86_64 是正常的（解释用）
-        dl = [l for l in df.splitlines()
-              if 'download.docker.com' in l and not l.lstrip().startswith('#')]
-        self.assertTrue(dl, '找不到 docker CLI 下载行')
-        for line in dl:
-            self.assertNotIn('stable/x86_64', line,
-                             'docker CLI 下载地址写死了 x86_64 —— ARM 上装的是跑不起来的二进制')
-
-    def test_dockerfile_maps_arch_names(self) -> None:
-        """架构名映射必须把 amd64→x86_64、arm64→aarch64 **映射正确**。
-
-        官方静态包目录名与 Docker 架构名不一致，是本项目踩过的坑；这里锁住映射，
-        避免以后有人"顺手简化"成直接用 TARGETARCH。
-
-        注意断言的是 `DOCKER_ARCH=` 的**取值**，而不是"文件里出现过 aarch64"——
-        后者是无效断言：`aarch64` 在 case 模式的左侧也出现，把 arm64 错映射成
-        x86_64 时它照样通过（本测试初版就是这样漏掉的）。
-        """
-        df = (_ROOT / 'Dockerfile').read_text(encoding='utf-8')
-        self.assertIn('TARGETARCH', df, '没使用 buildx 注入的 TARGETARCH')
-
-        # 解析 case 分支：`<patterns>)  DOCKER_ARCH=<value>`
-        mapping = {}
-        for patterns, value in re.findall(
-                r'^\s*([\w\s|]+?)\)\s*DOCKER_ARCH=(\w+)', df, re.M):
-            for name in patterns.split('|'):
-                mapping[name.strip()] = value
-
-        self.assertEqual(mapping.get('amd64'), 'x86_64', f'解析到的映射：{mapping}')
-        self.assertEqual(mapping.get('x86_64'), 'x86_64', f'解析到的映射：{mapping}')
-        self.assertEqual(mapping.get('arm64'), 'aarch64',
-                         f'arm64 没映射到 aarch64 —— ARM 上会装成 x86_64 二进制。'
-                         f'解析到的映射：{mapping}')
-        self.assertEqual(mapping.get('aarch64'), 'aarch64', f'解析到的映射：{mapping}')
-        # 未识别的架构必须构建期失败，而不是产出坏镜像
-        self.assertIn('exit 1', df, '不支持的架构应直接失败')
+        self.assertIn('FROM golang:', df)
+        self.assertIn('COPY workbuddy2api-master/', df)
+        self.assertIn('COPY --from=upstream-build', df)
 
 
 _FORK_IMAGE_WF = _ROOT / '.github' / 'workflows' / 'build-image.yml'

@@ -345,7 +345,8 @@ python -m unittest discover -s server/tests -t . -v
 
 ### 二、Docker 部署
 
-仓库自带管理端和 `workbuddy2api-master/` 上游源码；一次 Compose 启动两个服务：
+仓库自带管理端和 `workbuddy2api-master/` 上游源码；一次 Compose 只启动**一个容器**，
+容器入口会在其中启动 Go 上游与 Python 管理端两个进程：
 
 ```bash
 git clone https://github.com/ithtelab/workbuddy-manager.git
@@ -354,11 +355,12 @@ docker compose up -d --build
 docker compose logs workbuddy-manager | grep -A2 密码   # 首启随机密码
 ```
 
-上游需要更新时，只替换 `workbuddy2api-master/` 中的源码文件，保留其中的
-`config.json`、`auths/` 与 `data/`，然后重建上游服务即可：
+上游需要更新时，只替换 `workbuddy2api-master/` 中的源码文件；运行数据在
+Docker 命名卷 `workbuddy-manager-data` 与 `workbuddy-upstream-data`，不会被替换。
+然后重建这一个容器即可：
 
 ```bash
-docker compose up -d --build workbuddy2api
+docker compose up -d --build
 ```
 
 也可以直接用构建好的镜像（每次发版会推到 GHCR）：
@@ -370,16 +372,15 @@ docker pull ghcr.io/ithtelab/workbuddy-manager:latest
 > 镜像**同时提供 `linux/amd64` 与 `linux/arm64`**（Apple Silicon、ARM 云主机可直接拉取，
 > 无需 QEMU 模拟）。`docker pull` 会按你的机器架构自动选择对应的那一份。
 
-**容器版与宿主版的能力是一致的** —— compose 里默认挂载了三样东西让它们对齐：
+Compose 仅持久化两类运行数据：
 
 | 挂载 | 作用 |
 |---|---|
-| `./workbuddy2api-master` | 内置上游源码、配置与账号凭据；首启自动创建 `config.json` 和数据目录 |
-| `./data` | 数据库、日志、更新状态。必须持久化 |
-| `/var/run/docker.sock` | 让容器内的管理端能重启/重建上游容器 —— 即「更新上游」「保存设置后自动重载」「读上游日志」 |
+| `workbuddy-upstream-data` | 上游 `config.json`、账号凭据与状态；首启自动创建 |
+| `workbuddy-manager-data` | 数据库、日志、更新状态。必须持久化 |
 
-> **关于 docker.sock 的取舍**：挂它等于把宿主 root 权限交给本容器。但这**不是新增的风险等级**——宿主部署时本服务本来就是 root 运行（systemd 单元无 `User=`、安装脚本要求 root），而 root 进程本来就能 `docker run -v /:/host` 拿到宿主文件系统，两者权限等价。
-> 若你的要求是最小权限，把那一行注释掉即可：依赖 docker 的功能会**自动降级为「请到宿主机操作」**，界面如实提示，不会静默失败。
+**不挂载 Docker Socket。** 保存上游设置或新增账号时，管理端会通知同一容器内的
+Go 子进程平滑重启；上游日志写入 `data/workbuddy2api.log` 并由面板读取。
 
 还有两处与宿主部署的差异（界面都会提示）：
 
@@ -390,6 +391,8 @@ docker pull ghcr.io/ithtelab/workbuddy-manager:latest
 > （那是另一条信任链，依赖 GHCR 的 digest 与 GitHub 账号安全）。
 
 ### 三、部署到服务器（一键脚本）
+
+> 一键脚本是传统宿主机部署方式。需要单容器部署时，请使用上方 Docker Compose。
 
 本项目内置上游 [`workbuddy2api`](https://github.com/Sliverkiss/workbuddy2api)
 （账号池与 OpenAI 兼容接口）源码；一键脚本会在干净机器上部署两者：
@@ -437,8 +440,8 @@ journalctl -u workbuddy-web | grep -A3 '初始管理员'
 | `WB2API_BASE` | `http://127.0.0.1:7863` | workbuddy2api 地址 |
 | `WB2API_KEY` | 读 config.json | 上游 API Key |
 | `WB2API_CONTAINER` | `workbuddy2api` | 重载用的容器名 |
-| `WB_AUTH_DIR` | `/opt/workbuddy2api/auths` | 账号授权目录 |
-| `WB_UPSTREAM_CONFIG` | `/opt/workbuddy2api/config.json` | 上游配置文件 |
+| `WB_AUTH_DIR` | `/opt/workbuddy2api/auths` | 账号授权目录（单容器 Compose 覆盖为命名卷内路径） |
+| `WB_UPSTREAM_CONFIG` | `/opt/workbuddy2api/config.json` | 上游配置文件（单容器 Compose 覆盖为命名卷内路径） |
 | `WB_DATA_DIR` | `./data` | 本服务数据目录 |
 | `WB_STATIC_DIR` | `./web/out` | 静态导出目录 |
 | `WB_ADMIN_PASSWORD` | 随机生成 | 首次启动的 admin 密码 |

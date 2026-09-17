@@ -5,7 +5,9 @@ import asyncio
 import base64
 import ipaddress
 import json
+import os
 import re
+import signal
 import socket
 import time
 from pathlib import Path
@@ -394,6 +396,18 @@ def models_source(items: list) -> str:
 
 
 async def restart_container() -> tuple[bool, str]:
+    pid_file = os.environ.get('WB2API_PID_FILE', '').strip()
+    if pid_file:
+        try:
+            pid = int(Path(pid_file).read_text(encoding='utf-8').strip())
+            os.kill(pid, signal.SIGTERM)
+            return True, '内置 workbuddy2api 正在重启'
+        except FileNotFoundError:
+            return False, '内置 workbuddy2api 尚未启动'
+        except (ValueError, ProcessLookupError) as exc:
+            return False, f'内置 workbuddy2api 进程不可用：{exc}'
+        except Exception as exc:  # noqa: BLE001
+            return False, str(exc)
     name = config.WB2API_CONTAINER
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -417,6 +431,14 @@ def read_container_logs(limit: int = 200, timestamps: bool = True) -> list[str]:
     默认带 `--timestamps`：docker 会在每行前面加上精确到纳秒的 RFC3339 时间，
     自动任务日志据此获得准确时间并据此去重（上游自己的 log 前缀精度只到秒）。
     """
+    log_file = os.environ.get('WB2API_LOG_FILE', '').strip()
+    if log_file:
+        try:
+            lines = Path(log_file).read_text(encoding='utf-8', errors='replace').splitlines()
+            return lines[-max(1, min(5000, limit)):]
+        except Exception:  # noqa: BLE001
+            return []
+
     import subprocess
 
     cmd = ['docker', 'logs', '--tail', str(max(1, min(5000, limit)))]
@@ -430,6 +452,11 @@ def read_container_logs(limit: int = 200, timestamps: bool = True) -> list[str]:
         return [ln for ln in raw.splitlines() if ln.strip()]
     except Exception:  # noqa: BLE001
         return []
+
+
+def can_restart_in_process() -> bool:
+    """单容器模式由入口脚本监控上游子进程，可通过 PID 文件重启。"""
+    return bool(os.environ.get('WB2API_PID_FILE', '').strip())
 
 
 # 管理端**允许读写**的上游配置段。既是 `save_upstream_config` 的写入白名单，
