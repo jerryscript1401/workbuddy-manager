@@ -16,6 +16,10 @@ data/
 *.db-shm
 users.json
 config.json
+# 内置上游的运行期文件；源码 workbuddy2api-master/ 本身随项目提交。
+workbuddy2api-master/config.json
+workbuddy2api-master/auths/
+workbuddy2api-master/data/
 # 部署时写入的版本标记（运行期生成，不提交）
 .version
 

@@ -2,8 +2,7 @@
 # ============================================================
 # WorkBuddy Manager 一键部署脚本
 #
-# 本项目管理端依赖上游 workbuddy2api（提供账号池与 OpenAI 兼容接口）。
-# 单独 clone 本仓库是跑不起来的 —— 本脚本会自动检测并安装上游，
+# workbuddy2api 源码已随本项目发布；脚本会把它部署到项目目录，
 # 因此在一台干净机器上执行即可完成整套部署。
 #
 # 用法：
@@ -18,8 +17,7 @@ set -euo pipefail
 
 # ── 可配置项（均可用环境变量覆盖）─────────────────────────
 APP_DIR="${APP_DIR:-/opt/workbuddy-manager}"
-UPSTREAM_DIR="${UPSTREAM_DIR:-/opt/workbuddy2api}"
-UPSTREAM_REPO="${UPSTREAM_REPO:-https://github.com/Sliverkiss/workbuddy2api.git}"
+UPSTREAM_DIR="${UPSTREAM_DIR:-${APP_DIR}/workbuddy2api-master}"
 UPSTREAM_PORT="${UPSTREAM_PORT:-7863}"
 MANAGER_PORT="${MANAGER_PORT:-7864}"
 PY="${PY:-/usr/bin/python3}"
@@ -120,15 +118,12 @@ elif [ -f "${UPSTREAM_DIR}/config.json" ]; then
 else
   info "未检测到上游部署，开始安装到 ${UPSTREAM_DIR}"
 
-  command -v git >/dev/null 2>&1 || die "需要 git 来克隆上游仓库"
-
-  if [ -d "${UPSTREAM_DIR}/.git" ]; then
-    info "目录已存在，拉取最新代码"
-    ( cd "$UPSTREAM_DIR" && git pull --ff-only ) || warn "git pull 失败，沿用现有代码"
-  else
-    info "克隆 ${UPSTREAM_REPO}"
-    git clone --depth 1 "$UPSTREAM_REPO" "$UPSTREAM_DIR"
+  [ -d "${SRC_DIR}/workbuddy2api-master" ] || die "发布包缺少内置 workbuddy2api 源码"
+  mkdir -p "${UPSTREAM_DIR}"
+  if [ "$(cd "${SRC_DIR}/workbuddy2api-master" && pwd)" != "$(cd "${UPSTREAM_DIR}" && pwd)" ]; then
+    cp -a "${SRC_DIR}/workbuddy2api-master/." "${UPSTREAM_DIR}/"
   fi
+  info "已部署仓库内置的 workbuddy2api 源码"
 
   cd "$UPSTREAM_DIR"
 

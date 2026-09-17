@@ -90,6 +90,8 @@ jobs:
           cp -r server "$STAGE/"
           mkdir -p "$STAGE/web" && cp -r web/out "$STAGE/web/"
           cp -r deploy "$STAGE/"
+          # 上游源码随发布包一起交付，安装时不再额外 clone。
+          cp -r workbuddy2api-master "$STAGE/"
           # 文档一并打包（安全审查报告、设计说明等），便于离线查阅
           cp -r docs "$STAGE/" 2>/dev/null || true
           cp .env.example README.md README.en.md CHANGELOG.md LICENSE "$STAGE/"

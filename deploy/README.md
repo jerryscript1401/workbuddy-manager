@@ -1,8 +1,7 @@
 # 部署指南
 
-本项目管理端**依赖上游 [`workbuddy2api`](https://github.com/Sliverkiss/workbuddy2api)**
-（提供账号池调度与 OpenAI 兼容接口）。单独 clone 本仓库是跑不起来的 ——
-为此我们提供了一键脚本，会在干净机器上自动安装好两者。
+本项目内置上游 [`workbuddy2api`](https://github.com/Sliverkiss/workbuddy2api) 源码
+（提供账号池调度与 OpenAI 兼容接口）；一键脚本会在干净机器上部署两者。
 
 > **重要**：请勿把本项目管理端的数据目录与上游账号目录提交或公开分享，
 > 其中含账号授权凭据。
@@ -17,14 +16,14 @@ wget https://github.com/ithtelab/workbuddy-manager/releases/latest/download/work
 tar xzf workbuddy-manager-*.tar.gz
 cd workbuddy-manager-*
 
-# 2) 一键部署（会自动检测并安装上游 workbuddy2api）
+# 2) 一键部署（使用包内 workbuddy2api 源码）
 sudo bash deploy/install.sh
 ```
 
 脚本会自动完成：
 
 1. 环境预检（Python ≥3.9、Docker、端口占用检查）
-2. **安装上游 workbuddy2api** —— 克隆、生成随机 `api_key`、设置目录属主、
+2. **安装内置 workbuddy2api** —— 复制源码、生成随机 `api_key`、设置目录属主、
    构建并启动容器、等待就绪
 3. 安装管理端 —— 部署代码、装依赖、注册 systemd 服务
 4. 验证两条链路并打印访问地址与初始密码
@@ -69,8 +68,7 @@ sudo APP_DIR=/opt/wbm \
 | 变量 | 默认值 | 说明 |
 |---|---|---|
 | `APP_DIR` | `/opt/workbuddy-manager` | 管理端目录 |
-| `UPSTREAM_DIR` | `/opt/workbuddy2api` | 上游目录 |
-| `UPSTREAM_REPO` | 上游 GitHub 地址 | 上游仓库地址 |
+| `UPSTREAM_DIR` | `/opt/workbuddy-manager/workbuddy2api-master` | 上游目录 |
 | `MANAGER_PORT` | `7864` | 管理端端口 |
 | `UPSTREAM_PORT` | `7863` | 上游端口 |
 | `PY` | `/usr/bin/python3` | Python 解释器路径 |

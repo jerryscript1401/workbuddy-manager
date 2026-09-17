@@ -345,14 +345,20 @@ python -m unittest discover -s server/tests -t . -v
 
 ### 二、Docker 部署
 
-仓库自带 `Dockerfile` 与 `docker-compose.yml`，适合已经用 Docker 跑上游的用户：
+仓库自带管理端和 `workbuddy2api-master/` 上游源码；一次 Compose 启动两个服务：
 
 ```bash
 git clone https://github.com/ithtelab/workbuddy-manager.git
 cd workbuddy-manager
-# 按需改 compose 里的 WB2API_BASE 与卷路径（默认假设上游在 ../workbuddy2api）
 docker compose up -d --build
 docker compose logs workbuddy-manager | grep -A2 密码   # 首启随机密码
+```
+
+上游需要更新时，只替换 `workbuddy2api-master/` 中的源码文件，保留其中的
+`config.json`、`auths/` 与 `data/`，然后重建上游服务即可：
+
+```bash
+docker compose up -d --build workbuddy2api
 ```
 
 也可以直接用构建好的镜像（每次发版会推到 GHCR）：
@@ -368,7 +374,7 @@ docker pull ghcr.io/ithtelab/workbuddy-manager:latest
 
 | 挂载 | 作用 |
 |---|---|
-| 上游仓库目录 | 读上游 compose 做端口收敛；`git pull` 更新上游；读写 `config.json` 与 `auths/`（**扫码添加账号会写 auths**，所以不能只读） |
+| `./workbuddy2api-master` | 内置上游源码、配置与账号凭据；首启自动创建 `config.json` 和数据目录 |
 | `./data` | 数据库、日志、更新状态。必须持久化 |
 | `/var/run/docker.sock` | 让容器内的管理端能重启/重建上游容器 —— 即「更新上游」「保存设置后自动重载」「读上游日志」 |
 
@@ -385,9 +391,8 @@ docker pull ghcr.io/ithtelab/workbuddy-manager:latest
 
 ### 三、部署到服务器（一键脚本）
 
-本项目依赖上游 [`workbuddy2api`](https://github.com/Sliverkiss/workbuddy2api)
-（账号池与 OpenAI 兼容接口），**单独 clone 本仓库无法运行**。
-为此提供了一键脚本，会在干净机器上自动装好两者：
+本项目内置上游 [`workbuddy2api`](https://github.com/Sliverkiss/workbuddy2api)
+（账号池与 OpenAI 兼容接口）源码；一键脚本会在干净机器上部署两者：
 
 ```bash
 # 推荐：用 Release 包（内含已构建的前端，无需 Node.js）
@@ -400,7 +405,7 @@ sudo bash deploy/install.sh
 脚本自动完成：
 
 1. 环境预检（Python / Docker / 端口）
-2. **安装上游 workbuddy2api** —— 克隆、生成随机 `api_key`、修正目录属主、
+2. **安装内置 workbuddy2api** —— 复制源码、生成随机 `api_key`、修正目录属主、
    构建并启动容器、等待就绪
 3. 安装管理端 —— 部署代码、装依赖、注册 systemd 服务
 4. 验证并打印访问地址与初始密码

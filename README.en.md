@@ -406,13 +406,12 @@ python -m unittest discover -s server/tests -t . -v
 
 ### 2. Docker
 
-The repo ships a `Dockerfile` and `docker-compose.yml` for users already running the
-upstream in Docker:
+The repo includes the console and the upstream source in `workbuddy2api-master/`; one
+Compose project starts both services:
 
 ```bash
 git clone https://github.com/ithtelab/workbuddy-manager.git
 cd workbuddy-manager
-# Adjust WB2API_BASE and volume paths if needed (defaults assume upstream at ../workbuddy2api)
 docker compose up -d --build
 docker compose logs workbuddy-manager | grep -A2 password   # first-boot random password
 ```
@@ -432,7 +431,7 @@ mounts three things to make that true:
 
 | Mount | Purpose |
 |---|---|
-| Upstream repo directory | Read its compose file for port confinement; `git pull` to update it; read/write `config.json` and `auths/` (**adding an account writes to auths**, so it cannot be read-only) |
+| `./workbuddy2api-master` | Bundled upstream source, config and account credentials; first boot creates `config.json` and data directories |
 | `./data` | Database, logs, update state. Must be persisted |
 | `/var/run/docker.sock` | Lets the console inside the container restart/rebuild the upstream container — i.e. "update upstream", "auto-reload after saving settings" and "read upstream logs" |
 
